@@ -120,7 +120,10 @@ jobs:
         if: matrix.db.family == 'pg'
         # Ghost's lockfile has no pg driver (unsupported database) — add it so
         # knex can at least attempt to connect, and the failure point is
-        # Ghost/knex, not a missing module.
+        # Ghost/knex, not a missing module. Re-resolving Ghost's monorepo
+        # lockfile OOMs node's default heap — give pnpm room.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm add -w pg@^8
 
       - name: Set timezone (non-UTC, matches upstream CI)
