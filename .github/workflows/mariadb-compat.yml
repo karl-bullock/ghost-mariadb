@@ -1,7 +1,13 @@
-# MariaDB compatibility harness for Ghost — private mirror of TryGhost/Ghost.
+# Database compatibility harness for Ghost — private mirror of TryGhost/Ghost.
 # Mirrors upstream's acceptance-tests CI job (services, env, test commands)
 # with the database swapped per matrix leg. mysql8 runs as the CONTROL: if it
-# is green and a mariadb leg is red, the failure is MariaDB-specific.
+# is green and another leg is red, the failure is database-specific.
+#
+# Legs: mysql8 (control) · mariadb 10.11/11.4 LTS · better-sqlite3 (supported
+# by Ghost, second control of sorts) · postgres 17 (INFORMATIONAL — Ghost
+# dropped pg support years ago; no pg driver in the lockfile and config
+# validation only accepts sqlite/mysql clients. The leg exists to document
+# exactly where it dies, not to pass).
 name: MariaDB compatibility
 
 on:
@@ -18,16 +24,39 @@ jobs:
       matrix:
         db:
           - name: mysql8-control
+            family: mysql
             image: mysql:8.0
             health: mysqladmin ping -h 127.0.0.1 -uroot -proot
+            node_env: testing-mysql
+            port: '3306'
           - name: mariadb-10.11
+            family: mysql
             image: mariadb:10.11
             health: healthcheck.sh --connect --innodb_initialized
+            node_env: testing-mysql
+            port: '3306'
           - name: mariadb-11.4
             # mariadb:11 images REMOVED the mysql* compat symlinks — mysqladmin
             # doesn't exist, so the healthcheck must use the official script.
+            family: mysql
             image: mariadb:11.4
             health: healthcheck.sh --connect --innodb_initialized
+            node_env: testing-mysql
+            port: '3306'
+          - name: sqlite-better3
+            # Empty image = the service container is skipped entirely (same
+            # trick upstream's CI uses for its sqlite leg).
+            family: sqlite
+            image: ''
+            health: 'true'
+            node_env: testing
+            port: ''
+          - name: postgres17-informational
+            family: pg
+            image: postgres:17
+            health: pg_isready -U postgres
+            node_env: testing-mysql
+            port: '5432'
     name: DB tests (${{ matrix.db.name }})
     services:
       mysql:
@@ -37,11 +66,11 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MARIADB_DATABASE: ghost_testing
           MARIADB_ROOT_PASSWORD: root
+          POSTGRES_DB: ghost_testing
+          POSTGRES_PASSWORD: root
         ports:
           - 3306
-        # Healthcheck is per-leg (matrix.db.health): mariadb:11 removed the
-        # mysql* compat symlinks, so mysql8 and mariadb need different commands.
-        # tmpfs keeps the DB in RAM.
+          - 5432
         options: >-
           --tmpfs /var/lib/mysql
           --health-cmd "${{ matrix.db.health }}"
@@ -58,11 +87,9 @@ jobs:
           --health-timeout=5s
           --health-retries=60
     env:
-      DB: mysql8
-      NODE_ENV: testing-mysql
+      DB: ${{ matrix.db.family == 'sqlite' && 'better-sqlite3' || 'mysql8' }}
+      NODE_ENV: ${{ matrix.db.node_env }}
       NX_NO_CLOUD: 'true'
-      database__connection__host: 127.0.0.1
-      database__connection__password: root
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -74,19 +101,59 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # --force on the sqlite leg so the optional better-sqlite3 dep is
+        # always installed/linked (same reasoning as upstream's CI).
+        run: |
+          if [ "${{ matrix.db.family }}" = "sqlite" ]; then
+            pnpm install --frozen-lockfile --force
+          else
+            pnpm install --frozen-lockfile
+          fi
+
+      - name: Install pg driver (postgres leg only)
+        if: matrix.db.family == 'pg'
+        # Ghost's lockfile has no pg driver (unsupported database) — add it so
+        # knex can at least attempt to connect, and the failure point is
+        # Ghost/knex, not a missing module.
+        run: pnpm add -w pg@^8
 
       - name: Set timezone (non-UTC, matches upstream CI)
         uses: szenius/set-timezone@v2.0
         with:
           timezoneLinux: "America/New_York"
 
-      - name: Set DB port
-        run: echo "database__connection__port=${{ job.services.mysql.ports['3306'] }}" >> "$GITHUB_ENV"
+      - name: Set env vars (mysql family)
+        if: matrix.db.family == 'mysql'
+        run: |
+          {
+            echo "database__connection__host=127.0.0.1"
+            echo "database__connection__port=${{ job.services.mysql.ports['3306'] }}"
+            echo "database__connection__password=root"
+          } >> "$GITHUB_ENV"
+
+      - name: Set env vars (sqlite)
+        if: matrix.db.family == 'sqlite'
+        run: echo "database__connection__filename=/dev/shm/ghost-test.db" >> "$GITHUB_ENV"
+
+      - name: Set env vars (postgres)
+        if: matrix.db.family == 'pg'
+        run: |
+          {
+            echo "database__client=pg"
+            echo "database__connection__host=127.0.0.1"
+            echo "database__connection__port=${{ job.services.mysql.ports['5432'] }}"
+            echo "database__connection__user=postgres"
+            echo "database__connection__password=root"
+            echo "database__connection__database=ghost_testing"
+          } >> "$GITHUB_ENV"
 
       - name: Report server version
         run: |
-          mysql -h 127.0.0.1 -P "$database__connection__port" -uroot -proot -e "SELECT VERSION();"
+          case "${{ matrix.db.family }}" in
+            mysql) mysql -h 127.0.0.1 -P "$database__connection__port" -uroot -proot -e "SELECT VERSION();" ;;
+            pg)    PGPASSWORD=root psql -h 127.0.0.1 -p "$database__connection__port" -U postgres -c "SELECT version();" ;;
+            *)     echo "better-sqlite3 (in-process)" ;;
+          esac
 
       - name: E2E tests
         id: e2e
@@ -125,3 +192,24 @@ jobs:
           if [ "${{ steps.e2e.outcome }}" != "success" ] || [ "${{ steps.integration.outcome }}" != "success" ]; then
             exit 1
           fi
+
+  report:
+    # On automated upstream syncs, file the verdict as an issue so new-release
+    # compatibility lands in the repo without anyone watching the run.
+    needs: db-tests
+    if: always() && contains(github.event.head_commit.message, 'Upstream sync:')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: File verdict issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUMMARY=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs[] | select(.name | startswith("DB tests")) | "- \(.name): **\(.conclusion // .status)**"')
+          TAG=$(echo "${{ github.event.head_commit.message }}" | head -1 | sed 's/Upstream sync: Ghost //; s/ (.*//')
+          gh issue create -R "${{ github.repository }}" \
+            --title "Ghost ${TAG}: database compatibility verdict" \
+            --body "$(printf 'Automated compat run for the upstream sync to **%s**.\n\n%s\n\nRun: %s/actions/runs/%s\n\nmysql8-control green + another leg red = database-specific failures; dig into that leg'"'"'s log for the failing tests.' "$TAG" "$SUMMARY" "${{ github.server_url }}/${{ github.repository }}" "${{ github.run_id }}")"

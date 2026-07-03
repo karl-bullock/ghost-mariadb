@@ -1,0 +1,43 @@
+# Weekly: if TryGhost/Ghost shipped a new release, re-snapshot the mirror onto
+# it and push — the push triggers the compatibility matrix, and the matrix's
+# report job files the verdict as an issue. Zero-touch loop.
+name: Upstream release check
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'   # Mondays 12:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Sync to latest upstream release if newer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(gh api repos/TryGhost/Ghost/releases/latest --jq .tag_name)
+          CURRENT=$(cat UPSTREAM_TAG 2>/dev/null || echo none)
+          echo "current=$CURRENT latest=$LATEST"
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "up to date"; exit 0
+          fi
+          git clone --depth 1 --branch "$LATEST" https://github.com/TryGhost/Ghost.git /tmp/upstream
+          SHA=$(git -C /tmp/upstream rev-parse HEAD)
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github/workflows' \
+            --exclude 'UPSTREAM_TAG' \
+            --exclude 'UPSTREAM_COMMIT' \
+            /tmp/upstream/ ./
+          echo "$LATEST" > UPSTREAM_TAG
+          echo "$SHA" > UPSTREAM_COMMIT
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Upstream sync: Ghost $LATEST ($SHA)"
+          git push
