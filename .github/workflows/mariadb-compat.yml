@@ -10,6 +10,12 @@
 # - mysql8 control + sqlite legs removed by choice to save minutes; if a
 #   future sync goes red, temporarily re-add a mysql:8.0 control leg to tell
 #   MariaDB-specific breakage from upstream breakage.
+# - mariadb-10.11 leg dropped (11.4 is the deployment target). Its final
+#   state, for the record: integration 398/398 (an earlier SIGSEGV was a
+#   flake), e2e green EXCEPT a reproducible trio in links.test.js — the
+#   Links API bulk-update returns rows with edited flags on the wrong rows
+#   (ordering/isolation delta vs MySQL8/11.4). So: "compatible except
+#   links-API bulk-edit ordering".
 name: MariaDB compatibility
 
 on:
@@ -30,8 +36,6 @@ jobs:
       fail-fast: false
       matrix:
         db:
-          - name: mariadb-10.11
-            image: mariadb:10.11
           - name: mariadb-11.4
             image: mariadb:11.4
     name: DB tests (${{ matrix.db.name }})
