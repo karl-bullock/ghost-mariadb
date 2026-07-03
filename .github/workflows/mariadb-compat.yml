@@ -89,6 +89,10 @@ jobs:
           mysql -h 127.0.0.1 -P "$database__connection__port" -uroot -proot -e "SELECT VERSION();"
 
       - name: E2E tests
+        id: e2e
+        # Keep going on failure so the integration suite still produces data —
+        # the final step re-asserts the job result.
+        continue-on-error: true
         run: pnpm nx run ghost:test:e2e
 
       - name: Start MinIO for integration tests
@@ -110,4 +114,14 @@ jobs:
           exit 1
 
       - name: Integration tests
+        id: integration
+        continue-on-error: true
         run: pnpm nx run ghost:test:integration
+
+      - name: Result
+        run: |
+          echo "e2e: ${{ steps.e2e.outcome }}"
+          echo "integration: ${{ steps.integration.outcome }}"
+          if [ "${{ steps.e2e.outcome }}" != "success" ] || [ "${{ steps.integration.outcome }}" != "success" ]; then
+            exit 1
+          fi
