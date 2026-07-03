@@ -1,0 +1,32 @@
+/* eslint-env node */
+import pkg from './package.json';
+import {publicAppViteConfig} from '../_shared/vite-public-app.mjs';
+
+export default publicAppViteConfig({
+    packageRoot: import.meta.dirname,
+    packageName: pkg.name,
+    entry: 'src/index.jsx',
+    i18nNamespace: 'portal',
+    cssCodeSplit: false,
+    overrides: {
+        define: {
+            REACT_APP_VERSION: JSON.stringify(process.env.npm_package_version)
+        },
+        resolve: {
+            dedupe: ['@tryghost/debug']
+        },
+        build: {
+            rollupOptions: {
+                output: {
+                    manualChunks: false
+                }
+            }
+        },
+        test: {
+            setupFiles: './test/setup-tests.js',
+            coverage: {
+                reporter: ['cobertura', 'text-summary', 'html']
+            }
+        }
+    }
+});

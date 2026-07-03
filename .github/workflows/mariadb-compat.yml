@@ -1,0 +1,107 @@
+# MariaDB compatibility harness for Ghost — private mirror of TryGhost/Ghost.
+# Mirrors upstream's acceptance-tests CI job (services, env, test commands)
+# with the database swapped per matrix leg. mysql8 runs as the CONTROL: if it
+# is green and a mariadb leg is red, the failure is MariaDB-specific.
+name: MariaDB compatibility
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - name: mysql8-control
+            image: mysql:8.0
+          - name: mariadb-10.11
+            image: mariadb:10.11
+          - name: mariadb-11.4
+            image: mariadb:11.4
+    name: DB tests (${{ matrix.db.name }})
+    services:
+      mysql:
+        image: ${{ matrix.db.image }}
+        env:
+          MYSQL_DATABASE: ghost_testing
+          MYSQL_ROOT_PASSWORD: root
+          MARIADB_DATABASE: ghost_testing
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306
+        # mysqladmin exists in the mariadb images too (compat symlink), so one
+        # healthcheck serves all three legs. tmpfs keeps the DB in RAM.
+        options: >-
+          --tmpfs /var/lib/mysql
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+      redis:
+        image: redis:7.0
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=60
+    env:
+      DB: mysql8
+      NODE_ENV: testing-mysql
+      NX_NO_CLOUD: 'true'
+      database__connection__host: 127.0.0.1
+      database__connection__password: root
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        env:
+          FORCE_COLOR: 0
+        with:
+          node-version: '22.18.0'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set timezone (non-UTC, matches upstream CI)
+        uses: szenius/set-timezone@v2.0
+        with:
+          timezoneLinux: "America/New_York"
+
+      - name: Set DB port
+        run: echo "database__connection__port=${{ job.services.mysql.ports['3306'] }}" >> "$GITHUB_ENV"
+
+      - name: Report server version
+        run: |
+          mysql -h 127.0.0.1 -P "$database__connection__port" -uroot -proot -e "SELECT VERSION();"
+
+      - name: E2E tests
+        run: pnpm nx run ghost:test:e2e
+
+      - name: Start MinIO for integration tests
+        run: |
+          docker run -d --rm --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio-user \
+            -e MINIO_ROOT_PASSWORD=minio-pass \
+            minio/minio:RELEASE.2024-12-13T22-19-12Z \
+            server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9000/minio/health/ready; then
+              echo "MinIO ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO did not become ready in time" >&2
+          docker logs minio
+          exit 1
+
+      - name: Integration tests
+        run: pnpm nx run ghost:test:integration
