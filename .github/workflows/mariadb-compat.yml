@@ -96,6 +96,9 @@ jobs:
       DB: ${{ matrix.db.family == 'sqlite' && 'better-sqlite3' || 'mysql8' }}
       NODE_ENV: ${{ matrix.db.node_env }}
       NX_NO_CLOUD: 'true'
+      # Lets tests branch on genuine MariaDB behavior deltas (see
+      # posts.test.js invalid-filter: MySQL errors, MariaDB coerces).
+      DB_FLAVOR: ${{ contains(matrix.db.name, 'mariadb') && 'mariadb' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
@@ -115,6 +118,12 @@ jobs:
           else
             pnpm install --frozen-lockfile
           fi
+
+      - name: Apply knex MariaDB default-literal fix
+        if: contains(matrix.db.name, 'mariadb')
+        # MariaDB returns quoted COLUMN_DEFAULT literals; unpatched knex 2.4.2
+        # corrupts column defaults in setNullable/dropNullable. See the script.
+        run: node .github/scripts/knex-mariadb-defaults-patch.mjs
 
       - name: Install pg driver (postgres leg only)
         if: matrix.db.family == 'pg'

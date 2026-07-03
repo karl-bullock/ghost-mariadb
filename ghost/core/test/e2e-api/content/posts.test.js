@@ -53,6 +53,7 @@ async function trackDb(fn, skip) {
 // invalid-filter test is mysql-only. Decided at registration from NODE_ENV
 // (vitest has no runtime this.skip).
 const isMySQL = (process.env.NODE_ENV || '').includes('mysql');
+const isMariaDB = process.env.DB_FLAVOR === 'mariadb';
 
 describe('Posts Content API', function () {
     let agent;
@@ -125,7 +126,10 @@ describe('Posts Content API', function () {
             });
     });
 
-    it.runIf(isMySQL)('Errors upon invalid filter value', async function () {
+    // MySQL 8 rejects an invalid datetime literal in a WHERE comparison, which
+    // Ghost surfaces as a 422. MariaDB coerces it (warning -> NULL) so the same
+    // query succeeds with no rows — same data safety, different error surface.
+    it.runIf(isMySQL && !isMariaDB)('Errors upon invalid filter value', async function () {
         await agent
             .get(`posts/?filter=published_at%3A%3C%271715091791890%27`)
             .expectStatus(422)
@@ -134,6 +138,13 @@ describe('Posts Content API', function () {
                     id: anyErrorId
                 }]
             });
+    });
+
+    it.runIf(isMariaDB)('Invalid filter value returns an empty result (MariaDB coerces invalid datetimes)', async function () {
+        const res = await agent
+            .get(`posts/?filter=published_at%3A%3C%271715091791890%27`)
+            .expectStatus(200);
+        require('node:assert/strict').equal(res.body.posts.length, 0);
     });
 
     it('Can filter posts by tag', async function () {
