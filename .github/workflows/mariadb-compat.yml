@@ -19,10 +19,15 @@ jobs:
         db:
           - name: mysql8-control
             image: mysql:8.0
+            health: mysqladmin ping -h 127.0.0.1 -uroot -proot
           - name: mariadb-10.11
             image: mariadb:10.11
+            health: healthcheck.sh --connect --innodb_initialized
           - name: mariadb-11.4
+            # mariadb:11 images REMOVED the mysql* compat symlinks — mysqladmin
+            # doesn't exist, so the healthcheck must use the official script.
             image: mariadb:11.4
+            health: healthcheck.sh --connect --innodb_initialized
     name: DB tests (${{ matrix.db.name }})
     services:
       mysql:
@@ -34,11 +39,12 @@ jobs:
           MARIADB_ROOT_PASSWORD: root
         ports:
           - 3306
-        # mysqladmin exists in the mariadb images too (compat symlink), so one
-        # healthcheck serves all three legs. tmpfs keeps the DB in RAM.
+        # Healthcheck is per-leg (matrix.db.health): mariadb:11 removed the
+        # mysql* compat symlinks, so mysql8 and mariadb need different commands.
+        # tmpfs keeps the DB in RAM.
         options: >-
           --tmpfs /var/lib/mysql
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-cmd "${{ matrix.db.health }}"
           --health-interval=2s
           --health-timeout=5s
           --health-retries=60
