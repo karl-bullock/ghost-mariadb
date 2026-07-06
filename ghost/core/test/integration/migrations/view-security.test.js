@@ -15,9 +15,7 @@ async function securityType(viewName) {
         WHERE table_schema = DATABASE()
         AND table_name = ?
     `, [viewName]);
-    // MySQL 8 returns information_schema result columns UPPERCASED regardless
-    // of the query's case; MariaDB preserves the case as written. Read both.
-    return rows[0] && (rows[0].SECURITY_TYPE ?? rows[0].security_type);
+    return rows[0] && rows[0].SECURITY_TYPE;
 }
 
 describe('Migrations - view security', function () {
