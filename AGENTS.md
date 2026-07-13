@@ -36,6 +36,45 @@ Two categories of apps:
 - `admin-x-design-system` - Legacy design system (being phased out)
 - `shade` - New design system (shadcn/ui + Radix UI + react-hook-form + zod)
 
+### koenig/* - Ghost editor (Koenig) packages
+Merged from the former TryGhost/Koenig repo with full git history:
+
+- **koenig-lexical** - The Lexical-based rich text editor UI. Bundled into
+  Ghost Admin at build time (`ghost/admin` copies its UMD build into admin
+  assets; `apps/posts` and `apps/admin` import it directly)
+- **kg-*** - Editor support packages: server-side renderers and converters
+  consumed by `ghost/core` (kg-default-nodes, kg-lexical-html-renderer,
+  kg-html-to-lexical, ...) plus frontend helpers (kg-unsplash-selector)
+
+All Koenig packages resolve via `workspace:` — nothing in dev, CI, or the
+release archive installs them from npm. They are published to npm for
+external consumers only, automatically as part of the Ghost release lane
+(see `publish_koenig_packages` in ci.yml).
+
+**Zero-build dev via the `source` export condition.** The `kg-*` libraries
+consumed by `ghost/core` (and `ghost/parse-email-address`) declare a `source`
+condition in their `package.json` `exports` that points at the raw
+`src/*.ts`, listed *before* `types`/`import`/`require`:
+
+```jsonc
+".": {
+  "source": "./src/index.ts",     // dev/test: read raw TS
+  "types": "./build/esm/index.d.ts",
+  "import": "./build/esm/index.js",
+  "require": "./build/cjs/index.js" // prod/published: compiled JS
+}
+```
+
+`ghost/core`'s dev runner (`nodemon.json`: `node --conditions=source --import=tsx`)
+and its Vitest configs (`resolve.conditions: ['source', 'node']` +
+`--import tsx --conditions=source`) activate this condition, so a source change
+in a `kg-*` package is picked up with **no `tsc` rebuild**. Production and the
+published npm tarball run plain `node`, which ignores `source` and uses
+`build/` — and `src/` is excluded from each package's `files` array, so it is
+never shipped. When adding a new backend-consumed TS workspace package, copy
+this `exports` shape (see `ghost/parse-email-address`) so it works build-free
+in dev from day one; keep the `^build` graph for `tsc`/type-checking and prod.
+
 ### e2e/ - End-to-end tests
 - Playwright-based E2E tests with Docker container isolation
 - See `e2e/CLAUDE.md` for detailed testing guidance
@@ -117,19 +156,30 @@ The `pnpm dev` command uses a **hybrid Docker + host development** setup:
 - MySQL, Redis, Mailpit
 - Caddy gateway/reverse proxy
 
-**What runs on host:**
-- Frontend dev servers (Admin, Portal, Comments UI, etc.) in watch mode with HMR
-- Foundation libraries (shade, admin-x-framework, etc.)
+**What runs on host by default:**
+- Admin, legacy Ember admin, Portal, and foundation library dev watchers
+- Optional public UMD app watchers can be added when needed
 
 **Setup:**
 ```bash
-# Start everything (Docker + frontend dev servers)
+# Start Ghost backend, Admin, Portal, and Docker services
 pnpm dev
+
+# Add optional public apps (comments-ui, sodo-search, signup-form, admin-toolbar)
+pnpm dev:public
+
+# Develop the Koenig editor against Ghost Admin (adds a koenig-lexical rebuild
+# watcher + preview server; Admin loads the editor from your local build)
+pnpm dev:lexical
 
 # With optional services (uses Docker Compose file composition)
 pnpm dev:analytics             # Include Tinybird analytics
 pnpm dev:storage               # Include MinIO S3-compatible object storage
-pnpm dev:all                   # Include all optional services
+pnpm dev:stripe                # Include Stripe webhook forwarding
+pnpm dev:full                  # Include analytics, storage, Stripe, and public app watchers
+
+# Everything available
+pnpm dev:all                   #
 ```
 
 **Accessing Services:**

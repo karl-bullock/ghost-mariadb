@@ -41,12 +41,12 @@ const newslettersRequest = {
     browseNewslettersLimit: {method: 'GET', path: '/newsletters/?filter=status%3Aactive&limit=1', response: responseFixtures.newsletters}
 };
 
-const configWithTenorEnabled = {
+const configWithKlipyEnabled = {
     ...responseFixtures.config,
     config: {
         ...responseFixtures.config.config,
-        tenor: {
-            googleApiKey: 'test-tenor-key',
+        klipy: {
+            apiKey: 'test-klipy-key',
             contentFilter: 'off'
         }
     }
@@ -746,7 +746,6 @@ test.describe('Member emails settings', async () => {
             await expect(modal).toBeVisible();
 
             const editor = modal.locator('[data-kg="editor"] div[contenteditable="true"]').first();
-            await editor.click({timeout: 5000});
             await editor.fill('');
             await expect(editor).toBeEmpty();
             await openSlashMenu(page, 'bookmark');
@@ -756,7 +755,10 @@ test.describe('Member emails settings', async () => {
             await expect(bookmarkUrlInput).toBeVisible({timeout: 10000});
             await bookmarkUrlInput.fill('https://ghost.org/');
             await expect(bookmarkUrlInput).toHaveValue('https://ghost.org/');
-            await bookmarkUrlInput.press('Enter');
+
+            const urlSuggestion = modal.getByTestId('bookmark-url-listOption').filter({hasText: 'https://ghost.org/'});
+            await expect(urlSuggestion).toBeVisible();
+            await urlSuggestion.click();
 
             await expect.poll(() => lastApiRequests.fetchOembed?.url || '').toContain('type=bookmark');
             await expect(modal.getByTestId('bookmark-title')).toContainText('Ghost: The Creator Economy Platform');
@@ -818,8 +820,8 @@ test.describe('Member emails settings', async () => {
             await expect(modal.locator('[data-kg-card="product"]')).toBeVisible();
         });
 
-        test('welcome email editor does not show GIF selector when Tenor is not configured', async ({page}) => {
-            await page.route('https://tenor.googleapis.com/**', async (route) => {
+        test('welcome email editor does not show GIF selector when Klipy is not configured', async ({page}) => {
+            await page.route('https://api.klipy.com/**', async (route) => {
                 await route.fulfill({
                     status: 200,
                     body: JSON.stringify({
@@ -861,8 +863,8 @@ test.describe('Member emails settings', async () => {
             await expect(slashMenu.getByText('GIF', {exact: true})).not.toBeVisible();
         });
 
-        test('welcome email editor shows GIF selector when Tenor is configured', async ({page}) => {
-            await page.route('https://tenor.googleapis.com/**', async (route) => {
+        test('welcome email editor shows GIF selector when Klipy is configured', async ({page}) => {
+            await page.route('https://api.klipy.com/**', async (route) => {
                 await route.fulfill({
                     status: 200,
                     body: JSON.stringify({
@@ -878,7 +880,7 @@ test.describe('Member emails settings', async () => {
             await mockApi({page, requests: {
                 ...globalDataRequests,
                 ...newslettersRequest,
-                browseConfig: {method: 'GET', path: '/config/', response: configWithTenorEnabled},
+                browseConfig: {method: 'GET', path: '/config/', response: configWithKlipyEnabled},
                 browseAutomatedEmails: {method: 'GET', path: '/automated_emails/', response: automatedEmailsFixture}
             }});
 
