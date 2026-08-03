@@ -36,6 +36,8 @@ export interface SettingsModalProps {
     buttonsDisabled?: boolean;
     okDisabled?: boolean;
     footer?: boolean | React.ReactNode;
+    /** Extra classes on the default footer's button row, e.g. to constrain its width. */
+    footerClassName?: string;
     header?: boolean;
     padding?: boolean;
     onOk?: () => void;
@@ -56,7 +58,7 @@ export interface SettingsModalProps {
     allowBackgroundInteraction?: boolean;
 }
 
-export const topLevelBackdropClasses = 'bg-modal-backdrop backdrop-blur-[3px]';
+const MODAL_BACKDROP_CLASSES = 'bg-modal-backdrop backdrop-blur-[3px]';
 
 const settingsModalVariants = cva(
     'relative z-50 flex max-h-full w-full flex-col justify-between overflow-x-hidden bg-background text-foreground',
@@ -133,6 +135,7 @@ const SettingsModal = forwardRef<HTMLElement, SettingsModalProps>(({
     okLoading = false,
     cancelLabel = 'Cancel',
     footer,
+    footerClassName,
     header,
     leftButton,
     buttonsDisabled,
@@ -255,7 +258,8 @@ const SettingsModal = forwardRef<HTMLElement, SettingsModalProps>(({
     const footerClasses = cn(
         paddingClasses,
         'flex w-full items-center justify-between',
-        stickyFooter && 'py-6'
+        stickyFooter && 'py-6',
+        footerClassName
     );
     const modalStyles: React.CSSProperties = {
         ...(typeof width === 'number' ? {width: '100%', maxWidth: `${width}px`} : {}),
@@ -326,7 +330,7 @@ const SettingsModal = forwardRef<HTMLElement, SettingsModalProps>(({
             <Box className={backdropClasses} id='modal-backdrop' onMouseDown={handleBackdropClick}>
                 <Box className={cn(
                     'pointer-events-none fixed inset-0 z-0',
-                    backDrop && !formSheet && topLevelBackdropClasses,
+                    backDrop && !formSheet && MODAL_BACKDROP_CLASSES,
                     formSheet && 'bg-form-sheet-backdrop'
                 )} />
                 <section

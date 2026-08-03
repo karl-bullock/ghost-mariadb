@@ -82,11 +82,11 @@ export default class FeatureService extends Service {
     @feature('adminUIRefresh') adminUIRefresh;
     @feature('lexicalIndicators') lexicalIndicators;
     @feature('editorExcerpt') editorExcerpt;
-    @feature('tagsX') tagsX;
-    @feature('commentModeration') commentModeration;
     @feature('memberDetailsReact') memberDetailsReact;
     @feature('previewByTier') previewByTier;
+    @feature('paywallImprovements') paywallImprovements;
     @feature('automations') automations;
+    @feature('csvContentImporter') csvContentImporter;
     _user = null;
 
     @computed('settings.labs')
